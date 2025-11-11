@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image, ExifTags
 from ultralytics import YOLO
+import os
 
 class NailDetect:
     def __init__(self, model_path):
@@ -43,9 +44,7 @@ class NailDetect:
         else:
             img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         angle_deg = np.degrees(angle)
-        if h > w:
-            angle_deg -= 90
-            w, h = h, w
+
         center = (cx, cy)
         rotation_matrix = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
         img_h, img_w = img_cv.shape[:2]
@@ -54,16 +53,13 @@ class NailDetect:
                                        borderMode=cv2.BORDER_CONSTANT,
                                        borderValue=(255, 255, 255))
         cx_rot, cy_rot = cx, cy
-        margin = 1.0
+        margin = 1.5
         half_w, half_h = (w * margin) / 2, (h * margin) / 2
-        x1 = int(cx_rot - half_w) - 30
-        x2 = int(cx_rot + half_w) + 30
-        y1 = int(cy_rot - half_h) - 50
-        y2 = int(cy_rot + half_h) + 50
-        x1 = max(0, x1)
-        y1 = max(0, y1)
-        x2 = min(img_w, x2)
-        y2 = min(img_h, y2)
+        x1 = max(0, int(cx_rot - half_w))
+        x2 = min(img_w, int(cx_rot + half_w))
+        y1 = max(0, int(cy_rot - half_h))
+        y2 = min(img_h, int(cy_rot + half_h))
+
         cropped_rotated = rotated_full[y1:y2, x1:x2]
         if len(cropped_rotated.shape) == 3:
             cropped_rotated = cv2.cvtColor(cropped_rotated, cv2.COLOR_BGR2RGB)
@@ -75,21 +71,58 @@ class NailDetect:
         cy_crop = cropped_rotated.shape[0] // 2
         obb_info = (cx_crop, cy_crop, cropped_rotated.shape[1], cropped_rotated.shape[0], 0.0)
         return cropped_rotated, obb_info
+    
+    def save_sorted_nails(self, results, save_dir, finger_names):
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        # x축 기준 정렬
+        sorted_results = sorted(results, key=lambda x: x["obb_info"][0])
+        for name, item in zip(finger_names, sorted_results):
+            img = Image.fromarray(item["cropped_nail"])
+            save_path = os.path.join(save_dir, f"{name}.jpg")
+            img.save(save_path)
+            print(f"Saved: {save_path}")
 
-    def detect_and_crop(self, img_bytes):
+    def detect_and_crop(self, img_bytes, is_thumb=False, save_dir="./"):
+        if is_thumb:
+            finger_names = ["left_thumb", "right_thumb"]
+        else:
+            finger_names = [
+                "left_pinky", "left_ring", "left_middle", "left_index",
+                "right_index", "right_middle", "right_ring", "right_pinky"
+            ]
         img = self.load_image(img_bytes)
         results = self.model(img)
-        output_list = []
+
+        obb_arrs = []
         for r in results:
             if r.obb is None:
                 continue
-            obb_arr = r.obb.xywhr.cpu().numpy()
-            num_objs = obb_arr.shape[0]
-            for i in range(num_objs):
-                cropped, obb_info = self.crop_rotated_bbox(img, obb_arr, idx=i)
-                if cropped is not None:
-                    output_list.append({
-                        "cropped_nail": cropped,
-                        "obb_info": obb_info
-                    })
+            obb_arrs.append(r.obb.xywhr.cpu().numpy())
+
+        if len(obb_arrs) == 0:
+            return []
+        obb_arr = np.vstack(obb_arrs)
+        sorted_indices = np.argsort(obb_arr[:, 0])
+
+        output_list = []
+
+        for idx, finger_name in zip(sorted_indices, finger_names):
+            cropped, obb_info = self.crop_rotated_bbox(img, obb_arr, idx=idx)
+            if cropped is not None:
+                output_list.append({
+                    "cropped_nail": cropped,
+                    "obb_info": obb_info,
+                    "finger_name": finger_name
+                })
+
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        for item in output_list:
+            img_to_save = Image.fromarray(item["cropped_nail"])
+            save_path = os.path.join(save_dir, f"{item['finger_name']}.jpg")
+            img_to_save.save(save_path)
+            print(f"Saved: {save_path}")
+
         return output_list
