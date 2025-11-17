@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image, ExifTags
 from ultralytics import YOLO
+import matplotlib.pyplot as plt
 import os
 
 class NailDetect:
@@ -43,7 +44,7 @@ class NailDetect:
             img_cv = img_array
         else:
             img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        angle_deg = np.degrees(angle)
+        angle_deg = np.degrees(angle) % 360
 
         center = (cx, cy)
         rotation_matrix = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
@@ -64,24 +65,15 @@ class NailDetect:
         if len(cropped_rotated.shape) == 3:
             cropped_rotated = cv2.cvtColor(cropped_rotated, cv2.COLOR_BGR2RGB)
         crop_h, crop_w = cropped_rotated.shape[:2]
-        if crop_h <= crop_w:
-            cropped_rotated = cv2.rotate(cropped_rotated, cv2.ROTATE_90_CLOCKWISE)
-            crop_h, crop_w = crop_w, crop_h
+
+        if (angle_deg > 45 and angle_deg < 135) or (angle_deg > 225 and angle_deg < 315):
+            if crop_w > crop_h:
+                cropped_rotated = cv2.rotate(cropped_rotated, cv2.ROTATE_90_CLOCKWISE)
+
         cx_crop = cropped_rotated.shape[1] // 2
         cy_crop = cropped_rotated.shape[0] // 2
         obb_info = (cx_crop, cy_crop, cropped_rotated.shape[1], cropped_rotated.shape[0], 0.0)
         return cropped_rotated, obb_info
-    
-    def save_sorted_nails(self, results, save_dir, finger_names):
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        # x축 기준 정렬
-        sorted_results = sorted(results, key=lambda x: x["obb_info"][0])
-        for name, item in zip(finger_names, sorted_results):
-            img = Image.fromarray(item["cropped_nail"])
-            save_path = os.path.join(save_dir, f"{name}.jpg")
-            img.save(save_path)
-            print(f"Saved: {save_path}")
 
     def detect_and_crop(self, img_bytes, is_thumb=False, save_dir="./"):
         if is_thumb:

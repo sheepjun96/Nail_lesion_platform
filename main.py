@@ -40,7 +40,7 @@ def load_model():
 async def nail_detect(
     file: UploadFile = File(...),
     is_thumb: bool = Form(False),
-    save_dir: str = Form("./")
+    save_dir: str = Form("./static/images")
 ):
     img_bytes = BytesIO(await file.read())
     results = nail_detector.detect_and_crop(img_bytes, is_thumb=is_thumb, save_dir=save_dir)
@@ -58,7 +58,7 @@ async def plot_nail(cropped_image: UploadFile = File(...), obb_info: str = Form(
     cropped_img = np.array(Image.open(io.BytesIO(img_bytes)))
     
     obb = json.loads(obb_info)
-    cx, cy, w, h, _ = obb
+    cx, cy, _, _, _ = obb
 
     fig, ax = plt.subplots(1, figsize=(8,8))
     ax.imshow(cropped_img)  
@@ -82,3 +82,5 @@ async def predict(file: UploadFile = File(...)):
     image = Image.open(io.BytesIO(contents))
     result = lesion_predictor.predict(image)
     return result
+
+# uvicorn main:app --reload
